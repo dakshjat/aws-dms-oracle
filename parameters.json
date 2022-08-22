@@ -1,0 +1,26 @@
+{
+    "Parameters": {
+        "Name": "<Name>",
+        "Environment": "<Environment>",
+        "VpcId": "<VpcId>",
+        "SubnetId1": "<SubnetId1>",
+        "SubnetId2": "<SubnetId2>",
+        "ReplicationInstanceType": "<ReplicationInstanceType>",
+        "ReplicationInstanceStorage": "<ReplicationInstanceStorage>",
+        "ReplicationInstanceEngineVersion": "<ReplicationInstanceEngineVersion>",
+        "ReplicationInstanceMultiAz": "<ReplicationInstanceMultiAz>",
+        "ReplicationInstancePublic": "<ReplicationInstancePublic>",
+        "SourceDbEngine": "oracle",
+        "SourceDbName": "<SourceDbName>",
+        "SourceDbEndpoint": "<SourceDbEndpoint>",
+        "SourceDbUsername": "<SourceDbUsername>",
+        "SourceDbPassword": "<SourceDbPassword>",
+        "SourceDbPort": "<SourceDbPort>",
+        "TargetDbEngine": "oracle",
+        "TargetDbName": "<TargetDbName>",
+        "TargetDbEndpoint": "<TargetDbEndpoint>",
+        "TargetDbPort": "<TargetDbPort>",
+        "TargetDbUsername": "<TargetDbUsername>",
+        "TargetDbPassword": "<TargetDbPassword>"
+    }
+}

@@ -19,10 +19,10 @@ It covered the creation of the following AWS DMS resources:
 ___
 To create an AWS CloudFormation stack, you can use the following options:
 
-**#1.** Create an AWS CloudFormation stack with new resources and specify the template and enter appropriate parameters
+**#1.** Create an AWS CloudFormation stack with new resources and specify the template and enter appropriate parameters.
 
 **#2** Use the below command to create an AWS CloudFormation stack with a parameter file:
 
-* `aws cloudformation deploy --stack-name dms-template --template-file aws-dms-oracle.yaml --parameter-overrides file://config.json`
+* `aws cloudformation deploy --stack-name aws-dms-oracle --template-file aws-dms-oracle.yaml --parameter-overrides file://config.json`
 ___
 For more information on the migration, visit [Strategy to Migrate Oracle Databases to Amazon RDS for Oracle Using AWS DMS Effectively](https://medium.com/@dakshjat/strategy-to-migrate-oracle-databases-to-amazon-rds-for-oracle-using-aws-dms-effectively-da677853c646)

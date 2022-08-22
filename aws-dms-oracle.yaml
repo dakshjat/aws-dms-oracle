@@ -1,0 +1,619 @@
+---
+AWSTemplateFormatVersion: 2010-09-09                          
+Description: AWS DMS - Oracle                                 
+Parameters:     
+  Name:
+    Description: Application Name
+    Type: String                                               
+  Environment:                                                     
+    Description: Application Environment Name
+    Type: String
+  VpcId:
+    Type: String     
+  SubnetId1:
+    Type: String
+  SubnetId2:
+    Type: String        
+  ReplicationInstanceType:
+    Type: String
+    Default: dms.t3.large
+  ReplicationInstanceStorage:
+    Type: Number
+    Default: 100    
+  ReplicationInstanceEngineVersion:
+    Type: String
+  ReplicationInstanceMultiAz:
+    Type: String
+    Default: false    
+  ReplicationInstancePublic:
+    Type: String
+    Default: false    
+  SourceDbEngine:
+    Type: String
+  SourceDbName:
+    Type: String
+  SourceDbEndpoint:
+    Type: String
+  SourceDbPort:
+    Type: Number    
+  TargetDbEngine:
+    Type: String 
+  SourceDbUsername:
+    Type: String    
+  SourceDbPassword:
+    Type: String    
+    NoEcho: true    
+  TargetDbName:
+    Type: String    
+  TargetDbEndpoint:
+    Type: String
+  TargetDbPort:
+    Type: Number    
+  TargetDbUsername:
+    Type: String    
+  TargetDbPassword:
+    Type: String  
+    NoEcho: true
+
+Resources:
+  VpcSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Replication Security Group
+      SecurityGroupEgress:
+        - CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic by default
+          IpProtocol: '-1'
+      VpcId: !Ref VpcId
+  SubnetGroup:
+    Type: 'AWS::DMS::ReplicationSubnetGroup'
+    Properties:
+      ReplicationSubnetGroupDescription: Replication Subnet Group
+      SubnetIds:
+        - !Ref SubnetId1
+        - !Ref SubnetId2
+      ReplicationSubnetGroupIdentifier:  !Sub '${Environment}-${Name}-replication-subgroup'
+  ReplicationKMSKey:
+    Type: 'AWS::KMS::Key'
+    Properties:
+      KeyPolicy:
+        Version: 2012-10-17      
+        Statement:
+          - Action: 'kms:*'
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Resource: '*'
+          - Action:
+            - 'kms:Encrypt'
+            - 'kms:Decrypt'
+            - 'kms:ReEncrypt'
+            - 'kms:GenerateDataKey'
+            - 'kms:CreateGrant'
+            - 'kms:ListGrants'
+            - 'kms:DescribeKey'
+            Effect: Allow
+            Principal:
+              AWS: '*'
+            Resource: '*'
+            Condition:
+              StringEquals:
+                'kms:CallerAccount': !Ref 'AWS::AccountId'
+                'kms:ViaService': !Sub 'dms.${AWS::Region}.amazonaws.com'            
+      Description: Replication KMS KEY
+      Enabled: true
+      EnableKeyRotation: true
+  ReplicationKMSKeyAlias:
+      Type: 'AWS::KMS::Alias'
+      Properties:
+        AliasName: !Sub 'alias/${Environment}-${Name}-replication-key'
+        TargetKeyId: !Ref ReplicationKMSKey
+  DmsReplicationInstance:
+    Type: 'AWS::DMS::ReplicationInstance'
+    Properties:
+      ReplicationInstanceClass: !Ref ReplicationInstanceType
+      AllocatedStorage: !Ref ReplicationInstanceStorage
+      EngineVersion: !Ref ReplicationInstanceEngineVersion
+      KmsKeyId: !Ref ReplicationKMSKey
+      MultiAZ: !Ref ReplicationInstanceMultiAz
+      PubliclyAccessible: !Ref ReplicationInstancePublic
+      ReplicationInstanceIdentifier: !Sub '${Environment}-${Name}-instance'
+      ReplicationSubnetGroupIdentifier: !Ref SubnetGroup
+      VpcSecurityGroupIds:
+        - !Ref VpcSecurityGroup
+  DmsSourceEndpoint:
+    Type: 'AWS::DMS::Endpoint'
+    Properties:
+      EndpointType: source
+      EngineName: !Ref SourceDbEngine
+      DatabaseName: !Ref SourceDbName
+      EndpointIdentifier: !Sub '${Environment}-${Name}-${SourceDbEngine}-source'
+      KmsKeyId: !Ref ReplicationKMSKey
+      Username: !Ref SourceDbUsername      
+      Password: !Ref SourceDbPassword        
+      Port: !Ref SourceDbPort
+      ServerName: !Ref SourceDbEndpoint
+  DmsTargetEndpoint:
+    Type: 'AWS::DMS::Endpoint'
+    Properties:
+      EndpointType: target
+      EngineName: !Ref TargetDbEngine
+      DatabaseName: !Ref TargetDbName
+      EndpointIdentifier: !Sub '${Environment}-${Name}-${TargetDbEngine}-target'
+      ExtraConnectionAttributes: ''
+      KmsKeyId: !Ref ReplicationKMSKey
+      Username: TargetDbUsername      
+      Password: TargetDbPassword
+      Port: !Ref TargetDbPort
+      ServerName: !Ref TargetDbEndpoint  
+  Task1:
+    Type: 'AWS::DMS::ReplicationTask'
+    Properties:
+      MigrationType: full-load
+      ReplicationInstanceArn: !Ref DmsReplicationInstance
+      SourceEndpointArn: !Ref DmsSourceEndpoint
+      TargetEndpointArn: !Ref DmsTargetEndpoint
+      ReplicationTaskIdentifier: !Sub '${Environment}-${Name}-task1'   
+      TableMappings: |
+        {
+            "rules": [
+                {
+                    "rule-type": "selection",
+                    "rule-id": 2,
+                    "rule-name": 2,
+                    "object-locator": {
+                        "schema-name": "schema_name",
+                        "table-name": "table_name"
+                    },
+                    "rule-action": "exclude"
+                },                           
+                {
+                    "rule-type": "selection",
+                    "rule-id": "3",
+                    "rule-name": "3",
+                    "object-locator": {
+                        "schema-name": "schema_name",
+                        "table-name": "%"
+                    },
+                    "rule-action": "include"
+                },
+                {
+                    "rule-type": "transformation",
+                    "rule-id": "1",
+                    "rule-name": "1",
+                    "rule-target": "schema",
+                    "object-locator": {
+                        "schema-name": "schema_name"
+                    },
+                    "rule-action": "convert-uppercase"
+                }
+            ]
+        }
+      ReplicationTaskSettings: |
+        {
+          "TargetMetadata": {
+            "TargetSchema": "schema_name",
+            "SupportLobs": true,
+            "FullLobMode": false,
+            "LobChunkSize": 0,
+            "LimitedSizeLobMode": true,
+            "LobMaxSize": 1,
+            "InlineLobMaxSize": 0,
+            "LoadMaxFileSize": 0,
+            "ParallelLoadThreads": 0,
+            "ParallelLoadBufferSize":0,
+            "ParallelLoadQueuesPerThread": 1,
+            "ParallelApplyThreads": 0,
+            "ParallelApplyBufferSize": 100,
+            "ParallelApplyQueuesPerThread": 1,    
+            "BatchApplyEnabled": false,
+            "TaskRecoveryTableEnabled": false
+          },
+          "FullLoadSettings": {
+            "TargetTablePrepMode": "TRUNCATE_BEFORE_LOAD",
+            "CreatePkAfterFullLoad": false,
+            "StopTaskCachedChangesApplied": false,
+            "StopTaskCachedChangesNotApplied": false,
+            "MaxFullLoadSubTasks": 49,
+            "TransactionConsistencyTimeout": 600,
+            "CommitRate": 50000
+          },
+          "Logging": {
+            "EnableLogging": true,
+            "LogComponents": 
+              [{
+                "Id": "SOURCE_UNLOAD",
+                "Severity": "LOGGER_SEVERITY_ERROR"
+                },
+                {
+                "Id": "TARGET_LOAD",
+                "Severity": "LOGGER_SEVERITY_ERROR"
+                },
+                {
+                "Id": "SOURCE_CAPTURE",
+                "Severity": "LOGGER_SEVERITY_ERROR"
+                },
+                {
+                "Id": "TARGET_APPLY",
+                "Severity": "LOGGER_SEVERITY_ERROR"
+                },
+                {
+                "Id": "TASK_MANAGER",
+                "Severity": "LOGGER_SEVERITY_ERROR"
+                }]
+          },
+          "ControlTablesSettings": {
+            "ControlSchema":"",
+            "HistoryTimeslotInMinutes":5,
+            "HistoryTableEnabled": false,
+            "SuspendedTablesTableEnabled": false,
+            "StatusTableEnabled": false
+          },
+          "StreamBufferSettings": {
+            "StreamBufferCount": 3,
+            "StreamBufferSizeInMB": 8,
+            "CtrlStreamBufferSizeInMB": 5
+          },
+          "ChangeProcessingTuning": { 
+            "BatchApplyPreserveTransaction": true, 
+            "BatchApplyTimeoutMin": 1, 
+            "BatchApplyTimeoutMax": 30, 
+            "BatchApplyMemoryLimit": 500, 
+            "BatchSplitSize": 0, 
+            "MinTransactionSize": 1000, 
+            "CommitTimeout": 1, 
+            "MemoryLimitTotal": 1024, 
+            "MemoryKeepTime": 60, 
+            "StatementCacheSize": 50 
+          },
+          "ChangeProcessingDdlHandlingPolicy": {
+            "HandleSourceTableDropped": true,
+            "HandleSourceTableTruncated": true,
+            "HandleSourceTableAltered": true
+          },
+          "LoopbackPreventionSettings": null,
+          "CharacterSetSettings": null,
+          "ErrorBehavior": {
+            "DataErrorPolicy": "LOG_ERROR",
+            "DataTruncationErrorPolicy":"LOG_ERROR",
+            "DataErrorEscalationPolicy":"SUSPEND_TABLE",
+            "DataErrorEscalationCount": 0,
+            "TableErrorPolicy":"SUSPEND_TABLE",
+            "TableErrorEscalationPolicy":"STOP_TASK",
+            "TableErrorEscalationCount": 0,
+            "RecoverableErrorCount": -1,
+            "RecoverableErrorInterval": 5,
+            "RecoverableErrorThrottling": true,
+            "RecoverableErrorThrottlingMax": 1800,
+            "ApplyErrorDeletePolicy":"IGNORE_RECORD",
+            "ApplyErrorInsertPolicy":"LOG_ERROR",
+            "ApplyErrorUpdatePolicy":"LOG_ERROR",
+            "ApplyErrorEscalationPolicy":"LOG_ERROR",
+            "ApplyErrorEscalationCount": 0,
+            "FullLoadIgnoreConflicts": true,
+            "FailOnTransactionConsistencyBreached": false,
+            "FailOnNoTablesCaptured": false
+          },
+          "ValidationSettings": {
+            "EnableValidation": false,
+            "ValidationMode": "ROW_LEVEL",
+            "ThreadCount": 5,
+            "PartitionSize": 10000,
+            "FailureMaxCount": 10000,
+            "MaxKeyColumnSize": 8096,
+            "TableFailureMaxCount": 1000,
+            "ValidationOnly": false,
+            "HandleCollationDiff": false,
+            "RecordFailureDelayLimitInMinutes": 0,
+            "SkipLobColumns": false,
+            "ValidationPartialLobSize": 0,
+            "ValidationQueryCdcDelaySeconds": 0
+          }
+        }
+    DependsOn:      
+      - DmsSourceEndpoint
+      - DmsTargetEndpoint
+      - DmsReplicationInstance
+  Task2:
+    Type: 'AWS::DMS::ReplicationTask'
+    Properties:
+      MigrationType: cdc
+      ReplicationInstanceArn: !Ref DmsReplicationInstance
+      SourceEndpointArn: !Ref DmsSourceEndpoint
+      TargetEndpointArn: !Ref DmsTargetEndpoint
+      ReplicationTaskIdentifier: !Sub '${Environment}-${Name}-task2'
+      CdcStartPosition: "2022-08-22T13:25:40"       
+      TableMappings: |
+        {
+            "rules": [
+                {
+                    "rule-type": "selection",
+                    "rule-id": 2,
+                    "rule-name": 2,
+                    "object-locator": {
+                        "schema-name": "schema_name",
+                        "table-name": "table_name"
+                    },
+                    "rule-action": "exclude"
+                },               
+                {
+                    "rule-type": "selection",
+                    "rule-id": 3,
+                    "rule-name": 3,
+                    "object-locator": {
+                        "schema-name": "schema_name",
+                        "table-name": "%"
+                    },
+                    "rule-action": "include"
+                },
+                {
+                    "rule-type": "transformation",
+                    "rule-id": "1",
+                    "rule-name": "1",
+                    "rule-target": "schema",
+                    "object-locator": {
+                        "schema-name": "schema_name"
+                    },
+                    "rule-action": "convert-uppercase"
+                }
+            ]
+        }
+      ReplicationTaskSettings: |
+        {
+          "TargetMetadata": {
+            "TargetSchema": "schema_name",
+            "SupportLobs": true,
+            "FullLobMode": false,
+            "LobChunkSize": 0,
+            "LimitedSizeLobMode": true,
+            "LobMaxSize": 32,
+            "InlineLobMaxSize": 0,
+            "LoadMaxFileSize": 0,
+            "ParallelLoadThreads": 0,
+            "ParallelLoadBufferSize":0,
+            "ParallelLoadQueuesPerThread": 1,
+            "ParallelApplyThreads": 0,
+            "ParallelApplyBufferSize": 100,
+            "ParallelApplyQueuesPerThread": 1,    
+            "BatchApplyEnabled": false,
+            "TaskRecoveryTableEnabled": false
+          },
+          "FullLoadSettings": {
+            "TargetTablePrepMode": "TRUNCATE_BEFORE_LOAD",
+            "CreatePkAfterFullLoad": false,
+            "StopTaskCachedChangesApplied": false,
+            "StopTaskCachedChangesNotApplied": true,
+            "MaxFullLoadSubTasks": 49,
+            "TransactionConsistencyTimeout": 600,
+            "CommitRate": 50000
+          },
+          "Logging": {
+            "EnableLogging": true,
+            "LogComponents": 
+              [{
+                "Id": "SOURCE_UNLOAD",
+                "Severity": "LOGGER_SEVERITY_ERROR"
+                },
+                {
+                "Id": "TARGET_LOAD",
+                "Severity": "LOGGER_SEVERITY_ERROR"
+                },
+                {
+                "Id": "SOURCE_CAPTURE",
+                "Severity": "LOGGER_SEVERITY_ERROR"
+                },
+                {
+                "Id": "TARGET_APPLY",
+                "Severity": "LOGGER_SEVERITY_ERROR"
+                },
+                {
+                "Id": "TASK_MANAGER",
+                "Severity": "LOGGER_SEVERITY_ERROR"
+                }]
+          },
+          "ControlTablesSettings": {
+            "ControlSchema":"",
+            "HistoryTimeslotInMinutes":5,
+            "HistoryTableEnabled": false,
+            "SuspendedTablesTableEnabled": false,
+            "StatusTableEnabled": false
+          },
+          "StreamBufferSettings": {
+            "StreamBufferCount": 3,
+            "StreamBufferSizeInMB": 8,
+            "CtrlStreamBufferSizeInMB": 5
+
+          },
+          "ChangeProcessingTuning": { 
+            "BatchApplyPreserveTransaction": true, 
+            "BatchApplyTimeoutMin": 1, 
+            "BatchApplyTimeoutMax": 30, 
+            "BatchApplyMemoryLimit": 500, 
+            "BatchSplitSize": 0, 
+            "MinTransactionSize": 1000, 
+            "CommitTimeout": 1, 
+            "MemoryLimitTotal": 1024, 
+            "MemoryKeepTime": 60, 
+            "StatementCacheSize": 50 
+          },
+          "ChangeProcessingDdlHandlingPolicy": {
+            "HandleSourceTableDropped": true,
+            "HandleSourceTableTruncated": true,
+            "HandleSourceTableAltered": true
+          },
+          "LoopbackPreventionSettings": null,
+          "CharacterSetSettings": null,
+          "ErrorBehavior": {
+            "DataErrorPolicy": "LOG_ERROR",
+            "DataTruncationErrorPolicy":"LOG_ERROR",
+            "DataErrorEscalationPolicy":"SUSPEND_TABLE",
+            "DataErrorEscalationCount": 0,
+            "TableErrorPolicy":"SUSPEND_TABLE",
+            "TableErrorEscalationPolicy":"STOP_TASK",
+            "TableErrorEscalationCount": 0,
+            "RecoverableErrorCount": -1,
+            "RecoverableErrorInterval": 5,
+            "RecoverableErrorThrottling": true,
+            "RecoverableErrorThrottlingMax": 1800,
+            "ApplyErrorDeletePolicy":"IGNORE_RECORD",
+            "ApplyErrorInsertPolicy":"LOG_ERROR",
+            "ApplyErrorUpdatePolicy":"LOG_ERROR",
+            "ApplyErrorEscalationPolicy":"LOG_ERROR",
+            "ApplyErrorEscalationCount": 0,
+            "FullLoadIgnoreConflicts": true,
+            "FailOnTransactionConsistencyBreached": false,
+            "FailOnNoTablesCaptured": false
+          },
+          "ValidationSettings": {
+            "EnableValidation": false,
+            "ValidationMode": "ROW_LEVEL",
+            "ThreadCount": 5,
+            "PartitionSize": 10000,
+            "FailureMaxCount": 10000,
+            "MaxKeyColumnSize": 8096,
+            "TableFailureMaxCount": 1000,
+            "ValidationOnly": false,
+            "HandleCollationDiff": false,
+            "RecordFailureDelayLimitInMinutes": 0,
+            "SkipLobColumns": false,
+            "ValidationPartialLobSize": 0,
+            "ValidationQueryCdcDelaySeconds": 0
+          }
+        }
+    DependsOn:      
+      - DmsSourceEndpoint
+      - DmsTargetEndpoint
+      - DmsReplicationInstance
+  DmsSnsKMSKey:
+    Type: 'AWS::KMS::Key'
+    Properties:
+      KeyPolicy:
+        Version: 2012-10-17      
+        Statement:
+          - Action: 'kms:*'
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Resource: '*'
+          - Action:
+            - 'kms:Decrypt*'
+            - 'kms:GenerateDataKey'
+            Effect: Allow
+            Principal:
+            Principal:
+              Service: ["dms.amazonaws.com"]
+            Resource: '*'    
+          - Action:
+            - 'kms:Decrypt*'
+            - 'kms:GenerateDataKey'
+            Effect: Allow
+            Principal:
+              Service: ["sns.amazonaws.com"]
+            Resource: '*'                    
+      Description: AWS DMS Event SNS KMS KEY
+      Enabled: true
+      EnableKeyRotation: true
+  DmsSnsKMSKeyAlias:
+      Type: 'AWS::KMS::Alias'
+      Properties:
+        AliasName: !Sub 'alias/${Environment}-${Name}-sns-key'
+        TargetKeyId: !Ref DmsSnsKMSKey
+  DmsSnsTopic:  
+    Type: AWS::SNS::Topic
+    Properties: 
+      DisplayName: !Sub '${Environment}-${Name}-sns'
+      KmsMasterKeyId: !Ref DmsSnsKMSKey
+      TopicName: !Sub '${Environment}-${Name}-sns'
+  DmsSnsTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties: 
+      PolicyDocument:
+        Id: MyTopicPolicy
+        Version: '2012-10-17'
+        Statement:
+        - Sid: default
+          Effect: Allow
+          Principal:
+            AWS: "*"
+          Action:
+          - sns:GetTopicAttributes
+          - sns:SetTopicAttributes
+          - sns:AddPermission
+          - sns:RemovePermission
+          - sns:DeleteTopic
+          - sns:Subscribe
+          - sns:ListSubscriptionsByTopic
+          - sns:Publish
+          Resource: !Ref DmsSnsTopic 
+          Condition:
+            StringEquals:
+              "AWS:SourceOwner": !Sub "AWS::AccountId"
+        - Sid: dms-allow-publish
+          Effect: Allow
+          Principal:
+            Service: ["dms.amazonaws.com"]
+          Action:
+          - sns:Publish
+          Resource: !Ref DmsSnsTopic             
+      Topics: 
+        - !Ref DmsSnsTopic
+  DmsSnsTopicSubscription:
+    Type: AWS::SNS::Subscription
+    Properties: 
+      Endpoint: "example@example.com"    
+      Protocol: Email
+      TopicArn: !Ref DmsSnsTopic
+  DmsEventNotificationInstance:      
+    Type: AWS::DMS::EventSubscription
+    Properties: 
+      Enabled: true
+      EventCategories:         
+      - failover
+      - low storage
+      - failure
+      - "configuration change"
+      SnsTopicArn: !Ref DmsSnsTopic
+      SourceType: replication-instance
+      SourceIds: 
+        - !Sub '${Environment}-${Name}-instance'
+      SubscriptionName: !Sub '${Environment}-${Name}-instance'
+    DependsOn:      
+      - DmsReplicationInstance      
+  DmsEventNotificationTask:      
+    Type: AWS::DMS::EventSubscription
+    Properties: 
+      Enabled: true
+      EventCategories: 
+        - failure
+        - "configuration change"
+      SnsTopicArn: !Ref DmsSnsTopic
+      SourceType: replication-task
+      SourceIds: 
+        - !Sub '${Environment}-${Name}-task1'      
+        - !Sub '${Environment}-${Name}-task2'
+      SubscriptionName: !Sub '${Environment}-${Name}-task'
+    DependsOn:      
+      - Task1
+      - Task2
+      - DmsReplicationInstance      
+Outputs:
+  DmsSourceEndpoint:
+    Value: !Ref DmsSourceEndpoint
+    Export:
+      Name: !Sub '${Environment}-${Name}-${SourceDbEngine}-source'
+  DmsTargetEndpoint:
+    Value: !Ref DmsTargetEndpoint
+    Export:
+      Name: !Sub '${Environment}-${Name}-${TargetDbEngine}-target'
+  DmsReplicationInstance:
+    Value: !Ref DmsReplicationInstance
+    Export:
+      Name: !Sub '${Environment}-${Name}-instance'
+  Task1:
+      Value: !Ref Task1
+      Export:
+        Name: !Sub '${Environment}-${Name}-task1'
+  Task2:
+    Value: !Ref Task2
+    Export:
+      Name: !Sub '${Environment}-${Name}-task2'           
